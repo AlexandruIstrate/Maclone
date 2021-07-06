@@ -1,0 +1,30 @@
+--Project: Mac OS mockup
+--File name: @about
+--Description: About window
+
+--------------------------------------History--------------------------------------------------------
+-------Date---------------------------Details--------------------------------------------------------
+--	29.11.2016			Started
+
+os.loadAPI("macos/window")
+
+local startX = 13
+local startY = 6
+
+--Click handling
+local function handleClick()
+	local eventType, button, x, y = window.getClick()
+
+	if window.clickedExit(button, x, y, startX, startY) then
+		exit()
+	else
+		handleClick()
+	end
+end
+
+--Main
+window.openWindow(startX, startY, 37, 12, "About")
+window.drawImage("macos/images/about", 14, 8)
+window.write("Mac OS 9.2 mockup.", colours.black, colours.lightGrey, 20, 9)
+
+handleClick()

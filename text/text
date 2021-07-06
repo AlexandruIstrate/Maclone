@@ -1,0 +1,1211 @@
+--Project: Mac OS mockup
+--File name: text
+--Description: Text editor
+
+--------------------------------------History--------------------------------------------------------
+-------Date---------------------------Details--------------------------------------------------------
+--	28.12.2016			Started
+--	31.12.2016			Added window drawing and click handling
+--	03.01.2017			Added writing support
+--	04.01.2017			Added modifier key support, file reading, line editing and further refined the key system
+--	05.01.2017			Added support for text scrolling to the right, file saving, file data loading and displaying
+--	06.01.2017			Added functions for removing characters from the end or the begining of a line, inserting characters into a line, added exit handling
+--	07.01.2017			Added dialog for exiting
+--	08.01.2017			Added support for deleting
+--	09.01.2017			Fixed bugs related to writing and deleting and further refined the process of text editing, added home and end key functionality
+--	10.01.2017			Fixed bugs related to the home and end keys, added support for text navigation using the arrow keys
+--	11.01.2017			Improved scrolling to the right when wrting long lines, added scrolling for long lines, improved the functionality of the up and down arrows
+--	12.01.2017			Added home and end key functionality for long lines
+--	13.01.2017			Added delete key functionality, modified the aspect of the exit dialog
+--	16.01.2017			Added support for scrolling up and down
+--	17.01.2017			Bug bash and further polished the text editing mechanism
+--	18.01.2017			Got rid of more bugs, added exit dialog button press colouring, made inserting new lines better and modified to insert when editing text
+--	19.01.2017			Added context menu support
+--	20.01.2017			Added click handling and script running for the context menu
+--	21.01.2017			Added support for scrolling to the left, added support for caps lock and optimized the code more
+--	22.01.2017			Optimized the caps lock function and got rid of more bugs
+--	23.01.2017			Added a file name that modifies based on wether the file is modified or not, added text selection support, got rid of even more bugs and further optimized the application
+--	25.01.2017			Added text selection drag handling
+--	26.01.2017			Further refined the support for selecting, simplified the text selection system, and refined navigating with the arrow keys
+--	27.01.2017			Fixed bugs related to text editing and to text selecting
+--	30.01.2017			Improved scrolling up and down and fixed bugs
+--	31.01.2017			Fixed scrolling using the up and down arrow keys and fixed more issues
+--	01.02.2017			Improved moving up and down for scrolled lines and improved performance
+--	09.02.2017			General improvements for stability and performance and bug fixes
+--	10.02.2017			Improved the functionality of the backspace key
+--	12.02.2017			Added copy, cut and paste functions
+-----------------------------------------------------------------------------------------------------
+
+os.loadAPI("macos/window")
+
+--Window colours
+local backgroundColour = colours.grey
+
+--Command line arguments
+local args = {...}
+
+--File data
+local fileName
+
+--Positions
+local startX = 9
+local startY = 5
+
+local endX = 35
+local endY = 13
+
+local windowLength = endX - startX
+local windowHeight = endY - startY
+
+--Editing positions
+local editingX = startX + 1
+local editingY = startY + 1
+
+local lines = {}
+local modified = false
+
+--Selections
+local selection = {}
+local selectionStartX = 0
+local selectionStartY = 0
+
+local keyCount = 0
+
+local cursorDrawable = true
+
+--Copy cut and paste
+local clipboard = {}
+
+--Context menu
+local scriptsPath = "scripts/text/conmen/"
+local contextMenu = {"Cut", "Copy", "Paste"}	--Hardcoded on purpose: these are a bunch of features the text editor will implement no matter what
+
+--Scrolling
+local rightScrollCount = 0
+local atLineEnd = false
+
+local sliderY = startY + 2
+local segmentCount = 1
+local unitsScrolled = 1
+
+local scrollBarDrawn = false
+
+--Keys
+local modifierHistory = {}
+local capsLockOn = false
+
+--Key handling
+local function getKeyValue(key)
+	if key == keys.space then
+		return " "
+	elseif key == keys.tab then
+		return "    "
+	elseif key == keys.equals then
+		return "="
+	elseif key == keys.plus or key == keys.numPadAdd then
+		return "+"
+	elseif key == keys.minus or key == keys.numPadSubtract then
+		return "-"
+	elseif key == keys.multiply then
+		return "*"
+	elseif key == keys.slash or key == keys.numPadDivide then
+		return "/"
+	elseif key == keys.backSlash then
+		return "\\"
+	elseif key == keys.period then
+		return "."
+	elseif key == keys.comma then
+		return ","
+	elseif key == keys.apostrophe then
+		return "'"
+	elseif key == keys.semiColon then
+		return ";"
+	elseif key == keys.grave then
+		return "`"
+	elseif key == keys.leftBracket then
+		return "["
+	elseif key == keys.rightBracket then
+		return "]"
+	elseif key == keys.zero or key == keys.numPad0 then
+		return "0"
+	elseif key == keys.one or key == keys.numPad1 then
+		return "1"
+	elseif key == keys.two or key == keys.numPad2 then
+		return "2"
+	elseif key == keys.three or key == keys.numPad3 then
+		return "3"
+	elseif key == keys.four or key == keys.numPad4 then
+		return "4"
+	elseif key == keys.five or key == keys.numPad5 then
+		return "5"
+	elseif key == keys.six or key == keys.numPad6 then
+		return "6"
+	elseif key == keys.seven or key == keys.numPad7 then
+		return "7"
+	elseif key == keys.eight or key == keys.numPad8 then
+		return "8"
+	elseif key == keys.nine or key == keys.numPad9 then
+		return "9"
+	else
+		return keys.getName(key)
+	end
+end
+
+local function tail(tbl)
+	return tbl[#tbl]
+end
+
+local function isModifier(key)
+	if key == keys.leftAlt or key == keys.rightAlt or key == keys.leftShift or key == keys.rightShift or key == keys.leftCtrl or key == keys.rightCtrl then
+		return true
+	else
+		return false
+	end
+end
+
+local function isNormal(key)
+	return not isModifier(key)
+end
+
+local function hasNoStringValue(key)
+	if key == 1 or key == 183 or key == 70 or key == 197 then
+		return true
+	end
+end
+
+--String manipulation
+local function split(str, delimiter)
+	str = str .. delimiter
+	local fields = {}
+	local length = string.len(str)
+	local lastDelim = 1
+	
+	for i = 1, length do
+		if str:sub(i, i) == delimiter then
+			table.insert(fields, str:sub(lastDelim + 1, i - 1))
+			lastDelim = i
+		end
+	end
+	
+	return fields
+end
+
+--Text lines
+local function checkIndex(index)
+	if index > #lines then
+		return #lines
+	elseif index < 1 then
+		return 1
+	else
+		return index
+	end
+end
+
+local function setLine(line, index)
+	lines[index] = line
+end
+
+local function removeLine(index)
+	table.remove(lines, index)
+end
+
+local function addToLine(text, index)
+	if index <= 0 then
+		index = 1
+	end
+	
+	if text == nil then
+		text = ""
+	end
+
+	local currentLine = lines[index]
+	
+	if currentLine == nil then
+		lines[index] = text
+	else
+		lines[index] = lines[index] .. text
+	end
+end
+
+local function addToLineBegining(text, lineIndex)
+	lineIndex = checkIndex(lineIndex)
+	
+	setLine(text .. lines[lineIndex], lineIndex)
+end
+
+local function insert(chr, lineIndex, charIndex)
+	if lineIndex < 1 or lineIndex > #lines or charIndex < 1 or charIndex > string.len(lines[lineIndex]) then
+		return
+	end
+	
+	local line = lines[lineIndex]
+	local part1 = line:sub(1, charIndex)
+	local part2 = line:sub(charIndex + 1, string.len(line))
+	
+	setLine(part1 .. chr .. part2, lineIndex)
+end
+
+local function insertLine(line, lineIndex)
+	table.insert(lines, lineIndex, line)
+end
+
+local function checkRemoveCount(removeCount, length)
+	if removeCount <= 0 or removeCount > length then
+		return false
+	else	
+		return true
+	end
+end
+
+local function removeAtIndex(lineIndex, charIndex)
+	lineIndex = checkIndex(lineIndex)
+
+	if charIndex < 1 then
+		charIndex = 1
+	end
+
+	local line = lines[lineIndex]
+	setLine(line:sub(1, charIndex - 1) .. line:sub(charIndex + 1, line:len()), lineIndex)
+end
+
+local function removeFromLineEnd(index, removeCount)
+	index = checkIndex(index)
+
+	local line = lines[index]
+	local length = string.len(line)
+	
+	if not checkRemoveCount(removeCount, length) then
+		return
+	end
+
+	lines[index] = line:sub(1, length - removeCount)
+end
+
+local function removeFromLineBegining(index, removeCount)
+	index = checkIndex(index)
+	
+	local line = lines[index]
+	local length = string.len(line)
+	
+	if not checkRemoveCount(removeCount, length) then
+		return
+	end
+	
+	lines[index] = line:sub(removeCount, length)
+end
+
+local function getCharAt(lineIndex, charPos)
+	if not checkIndex(lineIndex) then
+		return nil
+	end
+
+	return lines[lineIndex]:sub(charPos, charPos)
+end
+
+--Text selection
+local function setSelection(selectedLines)
+	selection = selectedLines
+end
+
+local function insertSelectionLine(line, index)
+	if index == nil or index == "" then
+		table.insert(selection, line)
+	else
+		table.insert(selection, index, line)
+	end
+end
+
+local function clearSelection()
+	setSelection({})
+end
+
+local function select(stX, stY, edX, edY)
+	--Swap start and end positions if the selection is left to right or down-up
+	if stX > edX then
+		local temp = stX
+		
+		stX = edX
+		edX = temp
+	end
+	
+	if stY > edY then
+		local temp = stY
+		
+		stY = edY
+		edY = temp
+	end
+	
+	--Make sure that the selection contains only text
+	if stX <= startX then
+		stX = startX + 1
+	end
+	
+	local count = 0
+	local ret = {}	--Return buffer
+	
+	for i = (stY - startY), (edY - startY) do
+		paintutils.drawLine(stX, stY + count, edX - 1, edY, colours.blue)
+		
+		local line = lines[i]:sub(stX - startX, edX - startX)
+		
+		term.setCursorPos(stX, stY + count)
+		term.write(line)
+		
+		ret[#ret + 1] = line
+		
+		count = count + 1
+	end
+	
+	setSelection(ret)
+end
+
+--File handling
+local function readFile(path)
+	if fs.exists(path) then
+		local file = fs.open(path, "r")
+		local data = {}
+		local line
+	
+		while true do
+			line = file.readLine()
+			if not (line == nil) then
+				table.insert(data, line)
+			else
+				break
+			end
+		end
+		
+		file.close()
+		
+		return data
+	else
+		return nil
+	end
+end
+
+local function overWriteFile(path, lines)
+	if fs.exists(path) then
+		local file = fs.open(path, "w")
+		
+		for i = 1, #lines do
+			file.writeLine(lines[i])
+		end
+		
+		file.close()
+	end
+end
+
+local function appendToFile(path, lines)
+	if fs.exists(path) then
+		local file = fs.open(path, "a")
+		
+		for i = 1, #lines do
+			file.writeLine(lines[i])
+		end
+		
+		file.close()
+	end
+end
+
+local function loadFileContents()
+	lines = readFile(args[1])
+end
+
+--GUI elements
+local function setCursorDrawable(state)
+	cursorDrawable = state
+end
+
+local function drawCursor(positionX, positionY)
+	term.setBackgroundColour(backgroundColour)
+	
+	term.setCursorPos(positionX, positionY)
+	term.write("_")
+end
+
+local function setCursorPosition(positionX, positionY)
+	if cursorDrawable then
+		drawCursor(positionX, positionY)
+	end
+	
+	editingX = positionX
+	editingY = positionY
+end
+
+function drawSlider(positionX, positionY)
+	term.setBackgroundColour(backgroundColour)
+	term.setTextColour(colours.white)
+	term.setCursorPos(positionX, positionY)
+	term.write("H")
+	
+	sliderY = positionY
+end
+
+function drawArrow(posX, posY, upArrow)
+	term.setBackgroundColour(backgroundColour)
+	term.setTextColour(colours.white)
+	term.setCursorPos(posX, posY)
+	if upArrow then
+		term.write("^")
+	else
+		term.write("V")
+	end
+end
+
+function drawSliderBar(startX, startY, endY)
+	drawArrow(startX, startY, true)
+	
+	for i = 1, (windowHeight - 1) do
+		term.setCursorPos(startX, startY + i)
+		term.write("|")
+	end
+	
+	drawArrow(startX, endY, false)
+end
+
+local function drawSliderAssembly(sliderY)
+	if #lines > (windowHeight - 1) then
+		drawSliderBar(endX, startY + 1, endY)
+		drawSlider(endX, sliderY)
+	end
+end
+
+--Copy cut and pasting
+local function copy()
+	clipboard = {table.unpack(selection)}
+end
+
+local function cut()
+	copy()
+	
+	local lineIndex = selectionStartY - startY
+	for i = 1, #clipboard do
+		removeAtIndex(unitsScrolled + lineIndex, selectionStartX + clipboard[i]:len())	--Lines will be shifted up
+	end
+	
+	modified = true
+end
+
+local function paste()
+	for i = 1, #clipboard do
+		local relativeLineIndex = unitsScrolled + getCursorLine() + i
+		
+		if i == 1 then	--We're writing the first line
+			insert(clipboard[i], relativeLineIndex, rightScrollCount + editingX)
+		elseif i == #clipboard then	--We're writing the last line
+			insert(clipboard[i], relativeLineIndex, 1)
+		else	--We're writing a line between the first and last one	
+			insertLine(clipboard[i], relativeLineIndex)
+		end
+	end
+	
+	modified = true
+end
+
+--Click handling
+local function openSaveDialog()
+	local dialogStartX = startX + 2
+	local dialogStartY = startY + 2
+	
+	local dialogEndX = endX - 1
+	local dialogEndY = endY - 3
+	
+	--Drawing
+	window.openWindow(dialogStartX, dialogStartY, dialogEndX, dialogEndY, "Save?")
+	
+	--Save button
+	local saveStartX = dialogStartX + 1
+	local saveStartY = dialogStartY + 2
+	local saveEndX = dialogStartX + 6
+	local saveEndY = dialogStartY + 2
+	local saveButtonText = "Save"
+	
+	window.drawButton(saveStartX, saveStartY, saveEndX, saveEndY, colours.white, colours.black, saveButtonText)
+	
+	--Exit button
+	local exitStartX = dialogStartX + 8
+	local exitStartY = dialogStartY + 2
+	local exitEndX = dialogStartX + 13
+	local exitEndY = saveEndY
+	local exitButtonText = "Exit"
+	
+	window.drawButton(exitStartX, exitStartY, exitEndX, exitEndY, colours.white, colours.black, exitButtonText)
+	
+	--Return button
+	local returnStartX = dialogStartX + 15
+	local returnStartY = dialogStartY + 2
+	local returnEndX = dialogStartX + 22
+	local returnEndY = saveEndY
+	local returnButtonText = "Cancel"
+	
+	window.drawButton(returnStartX, returnStartY, returnEndX, returnEndY, colours.white, colours.black, returnButtonText)
+	
+	--Click handling
+	local eventType, button, x, y = window.getClick()
+	
+	if button == 1 then
+		if window.clickedExit(button, x, y, dialogStartX, dialogStartY) then	--Clicked the close button
+			return "c"
+		elseif x >= saveStartX and x <= saveEndX and y >= saveStartY and y <= saveEndY then	--Clicked the save button
+			window.drawButton(saveStartX, saveStartY, saveEndX, saveEndY, colours.blue, colours.white, saveButtonText)
+			os.sleep(0.2)
+			
+			return "xs"
+		elseif x >= exitStartX and x <= exitEndX and y >= exitStartY and y <= exitEndY then	--Clicked the exit button
+			window.drawButton(exitStartX, exitStartY, exitEndX, exitEndY, colours.blue, colours.white, exitButtonText)
+			os.sleep(0.2)
+			
+			return "x"
+		elseif x >= returnStartX and x <= returnEndX and y >= returnStartY and y <= returnEndY then	--Clicked the cancel button
+			window.drawButton(returnStartX, returnStartY, returnEndX, returnEndY, colours.blue, colours.white, returnButtonText)
+			os.sleep(0.2)
+		
+			return "c"
+		end
+	end
+end
+
+local function getBiggestSize(elements)
+	local longest = 0
+	
+	for i = 1, #elements do
+		local currentElementSize = elements[i]:len()
+	
+		if currentElementSize > longest then
+			longest = currentElementSize
+		end
+	end
+	
+	return longest
+end
+
+local function launchProgram(path)
+	shell.run(path)
+end
+
+local function closeContextMenu()
+	local oldX = positionX
+
+	specialDraw(false)
+	setCursorPosition(oldX, positionY)
+end
+
+local function handleContextMenuClick(elements, startX, startY, endX, endY)
+	local eventType, button, x, y = window.getClick()
+	local itemClickedIndex = 0
+	
+	if x >= startX and x <= endX and y >= startY and y <= endY then	--Clicked on the context menu
+		itemClickedIndex = y - startY + 1
+		
+		paintutils.drawFilledBox(startX, y, endX, y, colours.blue)
+		
+		local currentElement = elements[itemClickedIndex]
+		
+		term.setCursorPos(startX + 1, y)
+		term.write(currentElement)
+		
+		if currentElement == "Copy" then
+			copy()
+		elseif currentElement == "Cut" then
+			cut()
+		else
+			paste()
+		end
+		
+		sleep(0.2)
+		closeContextMenu()
+	else
+		closeContextMenu()
+	end
+	
+	return itemClickedIndex
+end
+
+local function openContextMenu(elements, positionX, positionY)
+	setCursorDrawable(false)
+
+	local biggest = getBiggestSize(elements)
+	paintutils.drawFilledBox(positionX, positionY, positionX + biggest + 2, positionY + #elements - 1, colours.lightGrey)
+	
+	for i = 0, (#elements - 1) do
+		term.setCursorPos(positionX + 1, positionY + i)
+		term.write(elements[i + 1])
+	end
+	
+	local itemClicked = handleContextMenuClick(elements, positionX, positionY, positionX + biggest + 2, positionY + #elements)
+	
+	term.setBackgroundColour(backgroundColour)
+	
+	setCursorDrawable(true)
+end
+
+local function scrollRight(writing)
+	paintutils.drawFilledBox(startX, startY + 1, endX, endY, backgroundColour)
+	
+	local linesToDraw = #lines
+	
+	if linesToDraw > windowHeight then
+		linesToDraw = windowHeight
+	end
+	
+	for i = 1, linesToDraw do
+		term.setCursorPos(startX + 1, startY + i)
+		term.write(string.sub(lines[i], rightScrollCount + 2, rightScrollCount + windowLength))
+	end
+	rightScrollCount = rightScrollCount + 1
+	
+	if writing then
+		setCursorPosition(editingX - 1, editingY)
+	end
+	
+	setCursorPosition(endX - 1, editingY)
+	
+	drawSliderAssembly(sliderY)
+end
+
+local function scrollLeft()
+	paintutils.drawFilledBox(startX, startY + 1, endX, endY, backgroundColour)
+	
+	local linesToDraw = #lines
+	
+	if linesToDraw > windowHeight then
+		linesToDraw = windowHeight
+	end
+	
+	for i = 1, linesToDraw do
+		local start = windowLength + rightScrollCount
+	
+		term.setCursorPos(startX + 1, startY + i)
+		term.write(lines[i]:sub(start, start + windowLength))
+	end
+	
+	rightScrollCount = rightScrollCount - 1
+end
+
+local function delete(addition)
+	if not (editingY == endX - 1) then
+		local oldX = editingX
+		local oldY = editingY
+		
+		removeAtIndex(getCursorLine(), getCursorChar() + addition)
+		drawFileContents()
+		setCursorPosition(oldX, oldY)
+		
+		paintutils.drawPixel(startX + string.len(lines[getCursorLine()]) + 1, editingY, backgroundColour)
+		
+		modified = true
+	end
+end
+
+local function moveLineDown()
+	local lineIndex = getCursorLine()
+	local line = lines[lineIndex]
+	local str = line:sub(getCursorChar(), startX + line:len() + 1)
+
+	insertLine(str, lineIndex + 1)
+	removeFromLineEnd(lineIndex, str:len())
+					
+	specialDraw(false)
+	setCursorPosition(startX + 1, editingY + 1)
+end
+
+local function scrollToEnd(spaceLeft)
+	for i = 1, spaceLeft do
+		scrollRight(false)
+	end
+end
+
+local function scrollUp()
+	if not (sliderY == startY + 2) then	--There is room to scroll up
+		sliderY = sliderY - 1
+		unitsScrolled = unitsScrolled - segmentCount
+		
+		specialDraw(false)
+		drawSliderAssembly(sliderY)
+	end
+end
+
+local function scrollDown()
+	if not (sliderY == endY - 1) then	--There is room to scroll down
+		sliderY = sliderY + 1
+		unitsScrolled = unitsScrolled + segmentCount
+		
+		specialDraw(false)
+		drawSliderAssembly(sliderY)
+	end
+end
+
+local function deselect()
+	if #selection > 0 then
+		clearSelection()
+		specialDraw(false)
+	end
+end
+
+function getCursorLine()
+	return editingY - startY
+end
+
+function getCursorChar()
+	return editingX - startX
+end
+
+local function handleAction()
+	local eventType, ret1, ret2, ret3 = os.pullEvent()
+	
+	if eventType == "mouse_click" then	--Handle for clicks
+		local button = ret1
+		local x = ret2
+		local y = ret3
+	
+		if button == 1 then	--Click
+			if window.clickedExit(button, x, y, startX, startY) then	--Clicked the close button
+				if not modified then	--No modifications so no saving is needed
+					exit()
+				else	--Ask the user if they want to save
+					local answer = openSaveDialog()
+
+					if answer == "xs" then	--Exit and save
+						overWriteFile(args[1], lines)
+						exit()
+					elseif answer == "x" then	--Exit without saving
+						exit()
+					elseif answer == "c" then	--Return to editing
+						draw()
+					end
+				end
+			elseif y == 1 then	--Clicked on the menu bar
+				
+			else	--Clicked on the editing area or on the desktop
+				if x >= startX and x <= endX and y >= startY + 1 and y <= endY then	--Clicked inside the window
+					if #lines > (windowHeight - 1) then	--The scroll bar exists
+						if x == endX and y >= startY + 1 and y <= endY then --Clicked on the scroll bar
+							if y == startY + 1 then	--Clicked the up arrow
+								scrollUp()
+							elseif y == endY then	--Clicked the down arrow
+								scrollDown()
+							else	--Clicked the scrolling area
+								local segment = y - startY - 1
+								
+								sliderY = startY + segment + 1
+								unitsScrolled = segment * segmentCount
+								
+								draw()
+								drawSliderAssembly(sliderY)
+							end
+						else
+							deselect()
+						end
+					else
+						deselect()
+					end
+				end
+			end
+			
+			clearSelection()
+			--specialDraw(false)
+		elseif button == 2 then	--Right click
+			openContextMenu(contextMenu, x, y)
+			
+			local lineSize = lines[y - startY]:len()
+			if x < lineSize then
+				setCursorPosition(x, y)
+			else
+				setCursorPosition(startX + lineSize + 1, y)
+			end
+		end
+	elseif eventType == "key" then	--Handle for key presses
+		keyCount = keyCount + 1
+	
+		local key = ret1
+		local keyVal = getKeyValue(key)
+		
+		--Add to the modifier table
+		if isModifier(key) then
+			table.insert(modifierHistory, {key, keyCount})
+		end
+		
+		term.setCursorPos(editingX, editingY)
+		
+		if key == keys.capsLock then
+			capsLockOn = not capsLockOn
+		elseif key == keys.enter or key == keys.numPadEnter then	--Go to the next line
+			local lineLength = string.len(lines[getCursorLine()])
+		
+			if lineLength >= (windowLength) then	--Handle for long lines
+				if rightScrollCount == (lines[getCursorLine()]:len() - (windowLength - 2)) then	--Cursor is at the end of the line
+					insertLine("", getCursorLine() + 1)
+					
+					specialDraw(false)
+					setCursorPosition(startX + 1, editingY + 1)
+				else	--Cursor is somewhere in the line
+					moveLineDown()
+				end
+				
+				modified = true
+			else	--Handle for short lines
+				if editingX < (startX + lineLength) then	--Cursor is somewhere in the line
+					moveLineDown()
+				else	--Cursor is at the end of the line
+					insertLine("", getCursorLine() + 1)
+					
+					specialDraw(false)
+					setCursorPosition(startX + 1, editingY + 1)
+				end
+				
+				modified = true
+			end
+		elseif key == keys.backspace then
+			if editingX == startX + 1 and not (editingY == startY + 1) then	--Cursor is at the begining of a line but not the first line
+				local lineIndex = getCursorLine()
+				local lineAboveLength = lines[lineIndex - 1]:len()
+			
+				addToLine(lines[lineIndex], lineIndex - 1)
+				removeLine(lineIndex)
+				
+				specialDraw(false)
+
+				if lineAboveLength >= windowLength then	--Line above is long
+					setCursorPosition(endX - 1, startY + lineIndex - 1)
+				else
+					setCursorPosition(startX + lineAboveLength + 1, startY + lineIndex - 1)
+				end
+				
+				modified = true
+			elseif editingX > startX + 1 then	--The cursor is somewhere in the line
+				delete(-1)
+				
+				specialDraw(false)
+				setCursorPosition(editingX - 1, editingY)
+			
+				modified = true
+			end
+		elseif key == keys.delete then
+			local currentLine = lines[getCursorLine()]
+			local currentLineLength = currentLine:len()
+		
+			if currentLineLength > windowLength then	--Handle for long lines
+				if rightScrollCount == (currentLineLength - windowLength) then	--Cursor is at the end of a long line
+					addToLine(currentLine, getCursorLine() - 1)
+					removeLine(getCursorLine())
+				else
+					delete(0)
+				end
+			else	--Handle for normal lines
+				if editingX == startX + currentLineLength then	--Cursor is at the end of a short line
+					addToLine(currentLine, getCursorLine() - 1)
+					removeLine(getCursorLine())
+				else
+					delete(0)
+				end
+			end
+			
+			specialDraw(false)
+			
+			modified = true
+		elseif key == keys.left then
+			if editingX > (startX + 1) then	--If the cursor is not at the begining of the line then go left
+				setCursorPosition(editingX - 1, editingY)
+				term.setCursorPos(editingX + 1, editingY)
+				
+				local add = sliderY
+				if add == 7 then
+					add = 0
+				else
+					add = add + 1
+				end
+			
+				local chr = getCharAt(getCursorLine() + add, rightScrollCount + getCursorChar() + 1)
+				if chr == "" or chr == nil then
+					paintutils.drawPixel(editingX + 1, editingY)
+				else
+					term.write(chr)
+				end
+			elseif rightScrollCount > 0 and editingX == startX + 1 then
+				scrollLeft()
+			end
+		elseif key == keys.right then
+			if not (editingX == (startX + string.len(lines[getCursorLine()]) + 1)) then	--If the cursor is not at the end of the line then go right
+				setCursorPosition(editingX + 1, editingY)
+				
+				local add = sliderY
+				if add == 7 then
+					add = 0
+				else
+					add = add + 1
+				end
+				
+				term.setCursorPos(editingX - 1, editingY)
+				term.write(getCharAt(getCursorLine() + add, getCursorChar() - 1))
+			elseif string.len(lines[getCursorLine()]) > windowLength then
+				if rightScrollCount < (string.len(lines[getCursorLine()]) - (windowLength) + 2) then
+					scrollRight(false)
+				end
+			end
+		elseif key == keys.up then
+			if #lines > windowHeight and editingY == (startY + 1) then	--There are more lines than the window height and the cursor is on the line at the bottom
+				if sliderY > 7 then
+					scrollUp()
+					setCursorPosition(editingX, editingY + segmentCount - 1)
+				end
+			elseif not (editingY == startY + 1) then --If the cursor is not on the top line then go up
+				if rightScrollCount > 0 then
+					specialDraw(false)
+					
+					local lineAboveLength = lines[getCursorLine() - 1]:len()
+					if lineAboveLength >= (windowLength) then
+						rightScrollCount = lineAboveLength - (windowLength)
+					else
+						rightScrollCount = 0
+					end
+				end
+			
+				local oldX = editingX
+				
+				if editingX <= (startX + string.len(lines[getCursorLine() - 1])) then	
+					setCursorPosition(editingX, editingY - 1)
+				else
+					setCursorPosition(startX + string.len(lines[getCursorLine() - 1]) + 1, editingY - 1)
+				end
+				
+				local add = sliderY
+				if add == 7 then
+					add = 0
+				else
+					add = add + 1
+				end
+				
+				local chr = getCharAt(getCursorLine() + add + 1, oldX - startX)
+				if chr == "" or chr == nil then
+					paintutils.drawPixel(oldX, editingY + 1, backgroundColour)
+				else
+					term.setCursorPos(oldX, editingY + 1)
+					term.write(chr)
+				end
+			end
+		elseif key == keys.down then
+			if #lines > windowHeight and editingY == (startY + windowHeight) then	--There are more lines than the window height and the cursor is on the line at the bottom
+				if sliderY < 12 then
+					scrollDown()
+					setCursorPosition(editingX, editingY - segmentCount + 1)
+				end
+			elseif not (editingY == startY + #lines) then	--If the cursor is not on the bottom line then go down
+				local oldX = editingX
+			
+				if editingX <= (startX + string.len(lines[getCursorLine() + 1])) then	--If the cursor position is not past the end of the line below then just go up
+					setCursorPosition(editingX, editingY + 1)
+				else
+					setCursorPosition(startX + string.len(lines[getCursorLine() + 1]) + 1, editingY + 1)
+				end
+				
+				local add = sliderY
+				if add == 7 then
+					add = 0
+				else
+					add = add + 1
+				end
+				
+				local chr = getCharAt(getCursorLine() + add - 1, oldX - startX)
+				if chr == "" or chr == nil then
+					paintutils.drawPixel(oldX, editingY - 1, backgroundColour)
+				else
+					term.setCursorPos(oldX, editingY - 1)
+					term.write(chr)
+				end
+			end
+		elseif key == keys.home then	--Go to the begining of the line
+			if string.len(lines[getCursorLine()]) > (windowLength) then
+				local oldY = editingY
+			
+				drawFileContents()
+				
+				setCursorPosition(startX + 1, oldY)
+			else
+				term.setCursorPos(editingX, editingY)
+			
+				local chr = lines[getCursorLine()]
+				if editingX == startX + string.len(chr) + 1 then
+					paintutils.drawPixel(editingX, editingY, backgroundColour)
+				elseif not (chr == nil) then
+					term.write(getCharAt(getCursorLine(), getCursorChar()))
+				else
+					term.write("")
+				end
+		
+				setCursorPosition(startX + 1, editingY)
+			end
+			
+			rightScrollCount = 0
+		elseif key == keys["end"] then	--Go to the end of the line
+			local currentLineLength = string.len(lines[getCursorLine()])
+			
+			if currentLineLength >= windowLength then	--Cursor is on a long line
+				local spaceLeft = currentLineLength - (windowLength - 2)
+				
+				if rightScrollCount < spaceLeft then	--The cursor is not at the end of the line
+					scrollToEnd(spaceLeft)
+				end
+			else	--Cursor is on a normal line
+				term.setCursorPos(editingX, editingY)
+				term.write(getCharAt(getCursorLine(), getCursorChar()))
+			
+				if currentLineLength > windowLength then
+					setCursorPosition(startX + windowLength, editingY)
+				else
+					setCursorPosition(startX + currentLineLength + 1, editingY)
+				end
+			end
+		elseif #modifierHistory > 0 then
+			if tail(modifierHistory)[2] == keyCount then	--Last key was a modifier
+				if tail(modifierHistory)[1] == keys.leftShift or tail(modifierHistory)[1] == keys.rightShift then	--Alphanumerical keys optionally with modifiers
+					local eventType2, key2, holding2 = os.pullEvent("key")
+			
+					if not isModifier(key2) then
+						local keyVal2
+					
+						if not capsLockOn then	--If caps lock is not on then use the uppercase variant of the key
+							keyVal2 = string.upper(getKeyValue(key2))
+						else
+							keyVal2 = getKeyValue(key2)
+						end
+						
+						if editingX == (startX + 1) then	--Cursor is at the begining of the line
+							addToLineBegining(keyVal2, getCursorLine() + segmentCount)
+						else	--Cursor is somewhere in the line or at the end
+							insert(keyVal2, getCursorLine(), getCursorChar() - 1 + rightScrollCount)
+						end
+						
+						specialDraw(false)
+				
+						editingX = editingX + 1
+					end
+					
+					modified = true
+				end
+			end
+		elseif not (hasNoStringValue(key) or key == keys.numLock or key == keys.scrollLock) then
+			if capsLockOn then
+				keyVal = string.upper(keyVal)
+			end
+			
+			if editingX == startX + 1 then	--Cursor is at the begining of the line
+				addToLineBegining(keyVal, getCursorLine())
+			else	--Cursor is somewhere in the line or at the end
+				insert(keyVal, getCursorLine(), getCursorChar() - 1 + rightScrollCount)
+			end
+			
+			specialDraw(false)
+			
+			editingX = editingX + 1
+			
+			modified = true
+		end
+		
+		if editingX == endX then	--Scroll to the right
+			scrollRight(true)
+		end
+	elseif eventType == "mouse_drag" then	--A selection was made
+		local button = ret1
+		
+		if button == 1 then
+			local x = ret2
+			local y = ret3
+			
+			if x > startX and x < endX and y > startY and y <= endY then	--Dragged the mouse inside the window
+				if selectionStartX == 0 and selectionStartY == 0 then	--If the start positions have the default value (0) then it means that no drag event was fired before
+					selectionStartX = x
+					selectionStartY = y
+				end
+				
+				select(selectionStartX - 1, selectionStartY, x, y)
+			end
+		end
+	end
+	
+	drawSliderAssembly(sliderY)
+	
+	if modified then
+		window.updateTopBar(startX, startY, endX, backgroundColour, "*" .. fileName)
+	end
+	
+	setCursorPosition(editingX, editingY)
+	
+	handleAction()
+end
+
+function drawWindow()
+	local fileFields = split(args[1], "/")
+	fileName = fileFields[#fileFields]
+	
+	if fs.isReadOnly(args[1]) then	--File is read only
+		window.openColouredWindow(startX, startY, endX, endY, backgroundColour, fileName .. "(Read Only)")
+	elseif modified then
+		window.openColouredWindow(startX, startY, endX, endY, backgroundColour, "*" .. fileName)
+	else
+		window.openColouredWindow(startX, startY, endX, endY, backgroundColour, fileName)
+	end
+end
+
+function drawFileContents(drawCursor)
+	local lineMaxSize = windowLength - 2
+	local lineIndex = 1	--Line index relative to the window's start
+	local lastOver = 0	--Last line that was longer than the window length
+	
+	for i = unitsScrolled, #lines do
+		if lineIndex == (windowHeight) + 1 then
+			break
+		end
+	
+		local currentElement = lines[i]
+		local length = string.len(currentElement)
+		
+		term.setCursorPos(startX + 1, startY + lineIndex)
+		lineIndex = lineIndex + 1
+		
+		if length > lineMaxSize then
+			term.write(currentElement:sub(1, lineMaxSize + 1))
+			lastOver = i
+		else
+			term.write(currentElement)
+		end
+	end
+	
+	if drawCursor then
+		if lastLineIndex == 0 then
+			lastLineIndex = endY - startY
+		end
+		
+		if #lines > (windowHeight - 1) then	--There are more lines than the window height
+			setCursorPosition(startX + 1, startY + 1)
+		elseif lastOver == #lines then	--Last line is bigger than the window length
+			setCursorPosition(startX + 1, startY + lastLineIndex)
+		else
+			setCursorPosition(startX + string.len(lines[#lines]) + 1, startY + #lines)
+		end
+	end
+end
+
+function specialDraw(drawCursor)
+	segmentCount = math.floor(#lines / (windowHeight - 3)) - 1	--This represents how many lines of file text one scroll segment means
+
+	drawWindow()
+	drawFileContents(drawCursor)
+	
+	if not scrollBarDrawn then
+		drawSliderAssembly(startY + 2)
+		scrollBarDrawn = true
+	end
+end
+
+function draw()
+	specialDraw(true)
+end
+
+local function init()
+	loadFileContents()
+	draw()
+end
+
+--Main
+init()
+handleAction()

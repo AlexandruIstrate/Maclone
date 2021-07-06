@@ -1,0 +1,518 @@
+--Project: Mac OS mockup
+--File name: hdd
+--Description: File management program
+
+--------------------------------------History--------------------------------------------------------
+-------Date---------------------------Details--------------------------------------------------------
+--	28.11.2016			Started; written main functions and designed structure
+--	05.12.2016			Added folder and file retrieving
+--	10.12.2016			Added folder and file drawing
+--	19.12.2016			Added click handling
+--	20.12.2016			Added hierarchical folder structure support
+--	30.12.2016			Added support for scrolling down
+--	31.12.2016			Added support for scrolling up
+--	02.02.2017			Rewrite of the click handling mechanics and performance improvements
+--	03.02.2017			Almost complete rewrite of the code
+--	04.02.2017			Made click handling much better
+--	05.02.2017			Implemented a new frame system
+--	06.02.2017			Made the frame system work
+--	07.02.2017			Updated the scroll functions
+--	08.02.2017			Made scrolling better
+--	05.07.2017			Moved file to scripts/icons
+-----------------------------------------------------------------------------------------------------
+
+os.loadAPI("macos/window")
+
+--Window positios
+local startX = 11
+local startY = 3
+
+local endX = 37
+local endY = 16
+
+local linesCovered = 1
+
+--Folders and files
+local currentPath = "/"
+
+local itemsCurrentDir = {}	--Items in this path, sorted by folders first and files second
+local folders = {}
+local files = {}
+
+local frameData = {}	--{{{itemName, startX, startY, endX, endY}, {another item}}, {another frame}}
+local lastFrame = 0
+
+local foldersDrawn = 0
+local filesDrawn = 0
+
+--Slider bar
+local sliderY = startY + 3
+local sliderBarSizeY = endY - startY - 4
+
+local scrollStage = 0
+
+local scrollHistory = {}
+
+--Icons
+local folderIconPath = "macos/images/folder"
+local fileIconPath = "macos/images/file"
+
+local folderIconMaxSize = window.getImageMaxSize(paintutils.loadImage(folderIconPath))
+local fileIconMaxSize = window.getImageMaxSize(paintutils.loadImage(fileIconPath))
+
+local sizes = {"B", "KB", "MB", "GB", "TB", "PB"} -- Enough for a few decades
+
+--Menus
+local menus = {"File", "Edit", "View", "Go", "Window", "Help"} -- Menus are hardcoded since they will not change on an per-application basis
+
+--Files
+local function getFreeDataString(bytes)
+	if bytes == 0 then
+		return "Unknown"
+	end
+
+	local i = 1
+	
+	while true do
+		local shrinked = bytes / 1024
+		if not (shrinked < 1) then
+			bytes = shrinked
+			i = i + 1
+		else
+			break
+		end
+	end
+	
+	local short = string.sub(bytes, 1, 3)	--Keep only 1 decimal
+	if tonumber(short) >= 1 and string.sub(short, 3, 3) == "0" then		--Shorten the number if it's bigger than 1 and the decimal is 0
+		short = string.sub(short, 1, 1)
+	end
+	
+	if not (sizes[i] == nil or sizes[i] == "") then
+		return short .. " " .. sizes[i]
+	else
+		return short
+	end
+end
+
+local function clearItemTables()
+	folders = {}
+	table.insert(folders, "")
+	folders = {}
+	
+	files = {}
+	table.insert(files, "")
+	files = {}
+end
+
+local function getItems(path)
+	clearItemTables()
+
+	local data = fs.list(path)
+	local sorted = {}
+	
+	for i = 1, #data do
+		local current = data[i]
+		local pathToFile
+		
+		if path:sub(#path, #path) == "/" then
+			pathToFile = path .. current
+		else
+			pathToFile = path .. "/" .. current
+		end
+	
+		if fs.isDir(pathToFile) then
+			table.insert(folders, current)
+		else
+			table.insert(files, current)
+		end
+	end
+	
+	sorted = {table.unpack(folders)}
+	
+	for i = 1, #files do
+		table.insert(sorted, files[i])
+	end
+	
+	return sorted
+end
+
+local function getLastFrameCount()
+	return table.getn(frameData[lastFrame])
+end
+
+local function drawFileName(name, positionX, positionY)
+	term.setTextColour(colours.black)
+	term.setBackgroundColour(colours.lightGrey)
+	term.setCursorPos(positionX, positionY)
+	term.write(name)
+end
+
+local function drawElement(imageX, imageY, textX, textY, elementName, image)
+	paintutils.drawImage(image, imageX, imageY)
+	drawFileName(elementName, textX, textY)
+end
+
+local function checkCount(count, tblSize)
+	if count > tblSize or count < 0 then
+		return false
+	else
+		return true
+	end
+end
+
+local function getFirstElements(tbl, count)
+	if not checkCount(count, #tbl) then
+		return
+	end
+	
+	local ret = {}
+	
+	for i = 1, count do
+		table.insert(ret, tbl[i])
+	end
+	
+	return ret
+end
+
+local function getLastElements(tbl, count)
+	if not checkCount(count, #tbl) then
+		return
+	end
+	
+	local ret = {}
+	
+	for i = (#tbl - count), #tbl do
+		table.insert(ret, tbl[i])
+	end
+	
+	return ret
+end
+
+--Scrolling
+local function setDrawCount(folders, files)
+	foldersDrawn = folders
+	filesDrawn = files
+end
+
+local function scrollUp(scrollSize)
+	if sliderY >= startY + scrollSize + 3 then
+		sliderY = sliderY - scrollSize
+		
+		local foldersToDraw = {}
+		local filesToDraw = {}
+		
+		local frame = frameData[scrollStage]
+		for i = 1, #frame do
+			local current = frame[i][1]
+		
+			if isFolder(current) then
+				table.insert(foldersToDraw, current)
+			else
+				table.insert(filesToDraw, current)
+			end
+		end
+		
+		scrollStage = scrollStage - 1
+		
+		if scrollStage == 0 then
+			sliderY = startY + 3
+		end
+		
+		if scrollStage == 0 then
+			setDrawCount(0, 0)
+		else
+			setDrawCount(scrollHistory[scrollStage][1], scrollHistory[scrollStage][2])
+		end
+		
+		--Drawing
+		drawWindow(foldersToDraw, filesToDraw)
+		
+		drawSliderBar(endX, startY + 2, endY)
+		drawSlider(endX, sliderY)
+	end
+end
+
+local function scrollDown(scrollSize)
+	if sliderY <= endY - scrollSize - 1 then
+		sliderY = sliderY + scrollSize
+		
+		local foldersToDraw = {}
+		local filesToDraw = {}
+		
+		local items = getLastElements(itemsCurrentDir, #itemsCurrentDir - foldersDrawn - filesDrawn)
+		for i = 1, #items do
+			local current = items[i]
+			
+			if isFolder(current) then
+				table.insert(foldersToDraw, current)
+			else
+				table.insert(filesToDraw, current)
+			end
+		end
+		
+		scrollStage = scrollStage + 1
+		scrollHistory[scrollStage] = {foldersDrawn, filesDrawn}
+		
+		if (scrollStage + 1) == lastFrame then
+			sliderY = endY - 1
+		end
+		
+		--Drawing
+		drawWindow(foldersToDraw, filesToDraw)
+		
+		drawSliderBar(endX, startY + 2, endY)
+		drawSlider(endX, sliderY)
+	end
+end
+
+function drawSlider(positionX, positionY)
+	term.setBackgroundColour(colours.lightGrey)
+	term.setTextColour(colours.white)
+	term.setCursorPos(positionX, positionY)
+	term.write("H")
+	
+	sliderY = positionY
+end
+
+function drawArrow(posX, posY, upArrow)
+	term.setBackgroundColour(colours.lightGrey)
+	term.setTextColour(colours.white)
+	term.setCursorPos(posX, posY)
+	
+	if upArrow then
+		term.write("^")
+	else
+		term.write("V")
+	end
+end
+
+function drawSliderBar(startX, startY, endY)
+	drawArrow(startX, startY, true)
+	
+	for i = 1, (endY - startY - 1) do
+		term.setCursorPos(startX, startY + i)
+		term.write("|")
+	end
+	
+	drawArrow(startX, endY, false)
+end
+
+function drawSet(tbl, posX, posY, imagePath)
+	local itemsDrawn = 0
+
+	for i = 1, #tbl do
+		local current = tbl[i]
+		local currentTextLenght = string.len(current)
+		
+		local image = paintutils.loadImage(imagePath)
+		local maxSize = window.getImageMaxSize(image)
+			
+		if posX + maxSize >= endX or posX + currentTextLenght >= endX then	--Check to see if the icon and the text will fit and if not go to the next row
+			posY = posY + 4
+			posX = startX + 1
+			
+			linesCovered = linesCovered + 1
+		end
+		
+		local iconX
+		if currentTextLenght > maxSize + 1 then
+			iconX = posX + (currentTextLenght - maxSize) / 2
+		else
+			iconX = posX
+		end
+		
+		if linesCovered <= 3 then
+			drawElement(iconX, posY, posX, posY + 2, current, image)
+			
+			itemsDrawn = itemsDrawn + 1
+		else
+			drawSliderBar(endX, startY + 2, endY)
+			drawSlider(endX, sliderY)
+			
+			break
+		end
+		
+		--Insert details about the current item in the frame data table
+		local frame
+		
+		if #frameData > 0 then
+			local data = frameData[lastFrame]
+		
+			if data == nil then
+				frame = {}
+			else
+				frame = data
+			end
+		else
+			frame = {}
+		end
+		
+		table.insert(frame, {current, posX, posY, posX + math.max(maxSize, current:len()) - 1, posY + 3})
+		frameData[lastFrame] = frame
+		
+		if currentTextLenght > maxSize + 1 then		--Add 1 so that if the item is just only 1 longer it will use the same arrangement
+			posX = posX + maxSize + 2 + (currentTextLenght - maxSize)
+		else
+			posX = posX + maxSize + 2
+		end
+	end
+	
+	return itemsDrawn
+end
+
+function split(tbl, startIndex, endIndex)
+	if startIndex < 1 or endIndex > #tbl or (endIndex - startIndex) < 0 then
+		return nil
+	end
+
+	local data = {}
+
+	for i = startIndex, endIndex do
+		table.insert(data, tbl[i])
+	end
+	
+	return data
+end
+
+local function drawAll(folders, files)
+	lastFrame = lastFrame + 1
+
+	local posX = startX + 1
+	local posY = startY + 3
+	
+	linesCovered = 1
+	
+	if not (folders == nil) and #folders > 0 then
+		foldersDrawn = foldersDrawn + drawSet(folders, posX, posY, folderIconPath)
+	end
+	
+	if not (files == nil) and #files > 0 then
+		local current
+		
+		if not (folders == nil) and #folders > 0 then
+			local frame = frameData[lastFrame]
+			local item = frame[#frame]
+		
+			current = {item[4], item[3]}
+		else
+			current = {posX, posY}
+		end
+		
+		if #folders > 0 then
+			filesDrawn = filesDrawn + drawSet(files, current[1] + 2, current[2], fileIconPath)
+		else
+			filesDrawn = filesDrawn + drawSet(files, current[1], current[2], fileIconPath)
+		end
+	end
+end
+
+function setPath(path)
+	currentPath = path
+	itemsCurrentDir = getItems(path)
+	
+	foldersDrawn = 0
+	filesDrawn = 0
+end
+
+local function writeCentered(text, textColour, bkgColour, startX, endX, positionY)
+	local length = string.len(text)
+	window.write(text, textColour, bkgColour, startX + (endX - startX - length) / 2, positionY)
+end
+
+local function getItemCount(itemCount)
+	if itemCount == 1 then
+		return itemCount .. " item"
+	else
+		return itemCount .. " items"
+	end
+end
+
+function drawWindow(folders, files)
+	window.openWindow(startX, startY, endX, endY, "Hard Disk")
+	writeCentered(getItemCount(#itemsCurrentDir) .. ", " .. getFreeDataString(fs.getFreeSpace(currentPath)) .. " free", colours.black, colours.lightGrey, startX, endX, startY + 1)
+	
+	drawAll(folders, files)
+end
+
+function isFolder(elementName)	--Checks if an item on the current path is a folder or a file
+	local pathToFile
+
+	if currentPath:sub(#currentPath, #currentPath) == "/" then
+		pathToFile = currentPath .. elementName
+	else
+		pathToFile = currentPath .. "/" .. elementName
+	end
+
+	return fs.isDir(pathToFile)
+end
+
+function isFile(elementName)
+	return not isFolder(elementName)
+end
+
+--Click handling
+local function handleClick()
+	local eventType, button, x, y = window.getClick()
+	
+	if button == 1 then	--Click
+		if window.clickedExit(button, x, y, startX, startY) then	--Clicked the close button
+			exit()
+		elseif y == 1 then	--Clicked on the menu bar
+			
+		elseif x == endX then	--Clicked on the scroll bar
+			local groupCount = math.floor(#itemsCurrentDir / getLastFrameCount())
+			local scrollSize = math.floor(sliderBarSizeY / groupCount)
+		
+			if y == startY + 2 then	--Clicked on the up arrow
+				scrollUp(scrollSize)
+			elseif y == endY then	--Clicked on the down arrow
+				scrollDown(scrollSize)
+			end
+		else	--Clicked on the window or on the desktop
+			if x >= startX and x <= endX and y >= startY and y <= endY then
+				local frame = frameData[lastFrame]
+			
+				for i = 1, #frame do
+					local item = frame[i]
+					
+					local sX = item[2]
+					local sY = item[3]
+					local eX = item[4]
+					local eY = item[5]
+					
+					if x >= sX and x <= eX and y >= sY and y <= eY then
+						local itemName = item[1]
+						
+						if isFolder(itemName) then
+							frameData = {}
+							table.insert(frameData, "")
+							frameData = {}
+							
+							lastFrame = 0
+						
+							setPath(currentPath .. itemName .. "/")
+							draw()
+						else
+							shell.run("text/text", currentPath .. itemName)
+						end
+					end
+				end
+			end
+		end
+	end
+	
+	handleClick()
+end
+
+function draw()
+	window.addMenus(menus, 2)
+	drawWindow(folders, files)
+end
+
+--Main
+setPath(currentPath)
+
+draw()
+
+handleClick()

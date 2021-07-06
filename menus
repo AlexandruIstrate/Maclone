@@ -1,0 +1,12 @@
+--Testing the menus in the window api
+os.loadAPI("macos/window")
+
+local menus = {"Menu1", "Menu2", "Menu3"}
+local menuPositions = window.addMenus(menus, 2)
+
+term.setCursorPos(1, 5)
+for i = 1, #menuPositions do
+	print(menuPositions[i])
+end
+
+term.setCursorPos(1, 10)

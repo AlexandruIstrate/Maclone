@@ -1,0 +1,173 @@
+--Project: Mac OS mockup
+--File name: window
+--Description: Window API
+
+--------------------------------------History--------------------------------------------------------
+-------Date---------------------------Details--------------------------------------------------------
+--	14.12.2016			Started
+--	15.12.2016			Added support for window specific things (images, labels, etc.)
+--	07.01.2017			Added support for buttons
+--	23.01.2017			Added support for updating the top bar and optimized the code
+-----------------------------------------------------------------------------------------------------
+
+--Implementation
+
+--Click handling
+function getClick()
+	return os.pullEvent("mouse_click")
+end
+
+function clickedExit(clickType, clickX, clickY, targetX, targetY)
+	if clickType == 1 and clickX == targetX and clickY == targetY then
+		return true
+	else
+		return false
+	end
+end
+
+--GUI drawing
+local function drawTopBar(startX, startY, endX, colour, windowName)
+	term.setBackgroundColour(colour)
+	term.setTextColour(colours.white)
+	term.setCursorPos(startX, startY)
+	term.write("#")
+	
+	local textLenght = string.len(windowName)
+	local textStartX = math.ceil(startX + (endX - startX - textLenght) / 2)
+	
+	term.setCursorPos(textStartX, startY)
+	term.write(windowName)
+	
+	for i = startX + 1, endX do
+		if i < textStartX or i > (textStartX + textLenght - 1) then
+			term.setCursorPos(i, startY)
+			term.write("=")
+		end
+	end
+end
+
+local function drawWindow(startX, startY, endX, endY, colour, windowName)
+	paintutils.drawFilledBox(startX, startY, endX, endY, colour)
+	drawTopBar(startX, startY, endX, colour, windowName)
+end
+
+--User functions
+function openWindow(startX, startY, endX, endY, windowName)
+	drawWindow(startX, startY, endX, endY, colours.lightGrey, windowName)
+end
+
+function openColouredWindow(startX, startY, endX, endY, colour, windowName)
+	drawWindow(startX, startY, endX, endY, colour, windowName)
+end
+
+function updateTopBar(startX, startY, endX, colour, windowName)
+	drawTopBar(startX, startY, endX, colour, windowName)
+end
+
+function drawImage(imagePath, positionX, positionY)
+	image = paintutils.loadImage(imagePath)
+	paintutils.drawImage(image, positionX, positionY)
+end
+
+function write(text, textColour, bkgColour, positionX, positionY)
+	term.setBackgroundColour(bkgColour)
+	term.setTextColour(textColour)
+	term.setCursorPos(positionX, positionY)
+	term.write(text)
+end
+
+function drawButton(startX, startY, endX, endY, buttonColour, textColour, text)
+	paintutils.drawFilledBox(startX, startY, endX, endY, buttonColour)
+	
+	--Text
+	local textX = math.ceil(startX + (endX - startX - string.len(text)) / 2)
+	local textY = math.ceil(startY + (endY - startY - 1) / 2)
+	
+	term.setCursorPos(textX, textY)
+	term.setTextColour(textColour)
+	term.write(text)
+	
+	return {startX, endX, startY, endY}
+end
+
+function drawButtonCenter(startX, startY, endX, endY, buttonColour, textColour, text)
+	local textLenght = string.len(text)
+	
+	--Button
+	if (endX - startX) < textLenght then
+		endX = startX + textLenght + 2
+	end
+	
+	if (endY - startY) < 3 then
+		endY = startY + 2
+	end
+	
+	return drawButton(startX, startY, endX, endY, buttonColour, textColour, text)
+end
+
+function getImageMaxSize(image)
+	local sizeX = 0
+	for i = 1, #image do
+		local currentLine = #image[i]
+		if currentLine > sizeX then
+			sizeX = currentLine
+		end
+	end
+	
+	return sizeX
+end
+
+--Menus
+local function getLongestItem(tbl)
+	local longest = 0
+	for i = 1, #tbl do
+		local currentElementSize = string.len(tbl[i])
+		if currentElementSize > longest then
+			longest = currentElementSize
+		end
+	end
+	
+	return longest
+end
+
+local function drawMenuBar()
+	term.setBackgroundColour(colours.lightGrey)
+	paintutils.drawLine(1, 1, 51, 1)
+end
+
+function drawDropDownMenu(elements, positionX)
+	local menuSize = getLongestItem(elements)
+	for i = 1, #elements do
+		paintutils.drawLine(positionX, i + 1, positionX + menuSize + 1, i + 1, colours.lightGrey)
+		term.setCursorPos(positionX + 1, i + 1)
+		term.setTextColour(colours.white)
+		term.write(elements[i])
+	end
+end
+
+local function addMenu(name, positionX)
+	term.setTextColour(colours.white)
+	term.setCursorPos(positionX, 1)
+	term.write(name)
+end
+
+function addMenus(menus, spacing, drawSpecialMenu)
+	drawMenuBar()
+
+	local position = 0
+	local menuPositions = {}
+
+	-- Draw the special menu
+	if not (drawSpecialMenu == nil or drawSpecialMenu == false) then
+		addMenu("@", position + spacing)
+		position = position + spacing + 1
+	end
+	
+	for i = 1, #menus do
+		addMenu(menus[i], position + spacing)
+		menuPositions[i] = position + spacing
+		position = position + string.len(menus[i]) + spacing
+	end
+	
+	return menuPositions
+end
